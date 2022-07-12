@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/chromedp/cdproto/dom"
-	"github.com/chromedp/chromedp"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/chromedp/cdproto/dom"
+	"github.com/chromedp/chromedp"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/elazarl/goproxy"
@@ -30,7 +31,7 @@ func TestSimple(t *testing.T) {
 	defer leaktest.Check(t)()
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"http://api.ipify.org"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			fmt.Println(string(r.Body))
 		},
 	}).Start()
@@ -39,7 +40,7 @@ func TestSimple(t *testing.T) {
 func TestUserAgent(t *testing.T) {
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"https://httpbin.org/anything"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			var data map[string]interface{}
 			err := json.Unmarshal(r.Body, &data)
 
@@ -53,10 +54,10 @@ func TestCache(t *testing.T) {
 	defer leaktest.Check(t)()
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"http://api.ipify.org"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			fmt.Println(string(r.Body))
 			g.Exports <- string(r.Body)
-			g.Get("http://api.ipify.org", nil)
+			g.Get("http://api.ipify.org", nil, nil)
 		},
 		Cache:       diskcache.New(".cache"),
 		CachePolicy: cache.RFC2616,
@@ -72,7 +73,7 @@ func TestQuotes(t *testing.T) {
 	}).Start()
 }
 
-func quotesParse(g *geziyor.Geziyor, r *client.Response) {
+func quotesParse(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 	r.HTMLDoc.Find("div.quote").Each(func(i int, s *goquery.Selection) {
 		// Export Data
 		g.Exports <- map[string]interface{}{
@@ -88,7 +89,7 @@ func quotesParse(g *geziyor.Geziyor, r *client.Response) {
 	// Next Page
 	if href, ok := r.HTMLDoc.Find("li.next > a").Attr("href"); ok {
 		absoluteURL, _ := r.Request.URL.Parse(href)
-		g.Get(absoluteURL.String(), quotesParse)
+		g.Get(absoluteURL.String(), quotesParse, nil)
 	}
 }
 
@@ -100,12 +101,12 @@ func TestAllLinks(t *testing.T) {
 	geziyor.NewGeziyor(&geziyor.Options{
 		AllowedDomains: []string{"books.toscrape.com"},
 		StartURLs:      []string{"http://books.toscrape.com/"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			g.Exports <- []string{r.Request.URL.String()}
 			r.HTMLDoc.Find("a").Each(func(i int, s *goquery.Selection) {
 				if href, ok := s.Attr("href"); ok {
 					absoluteURL, _ := r.Request.URL.Parse(href)
-					g.Get(absoluteURL.String(), g.Opt.ParseFunc)
+					g.Get(absoluteURL.String(), g.Opt.ParseFunc, nil)
 				}
 			})
 		},
@@ -117,9 +118,9 @@ func TestAllLinks(t *testing.T) {
 func TestStartRequestsFunc(t *testing.T) {
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartRequestsFunc: func(g *geziyor.Geziyor) {
-			g.Get("http://quotes.toscrape.com/", nil)
+			g.Get("http://quotes.toscrape.com/", nil, nil)
 		},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			r.HTMLDoc.Find("a").Each(func(_ int, s *goquery.Selection) {
 				g.Exports <- s.AttrOr("href", "")
 			})
@@ -131,13 +132,13 @@ func TestStartRequestsFunc(t *testing.T) {
 func TestGetRendered(t *testing.T) {
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartRequestsFunc: func(g *geziyor.Geziyor) {
-			g.GetRendered("https://httpbin.org/anything", g.Opt.ParseFunc)
+			g.GetRendered("https://httpbin.org/anything", g.Opt.ParseFunc, nil)
 		},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			fmt.Println(string(r.Body))
 			fmt.Println(r.Request.URL.String(), r.Header)
 		},
-		//URLRevisitEnabled: true,
+		// URLRevisitEnabled: true,
 	}).Start()
 }
 
@@ -159,9 +160,9 @@ func TestGetRenderedCustomActions(t *testing.T) {
 					return err
 				}),
 			}
-			g.Do(req, g.Opt.ParseFunc)
+			g.Do(req, g.Opt.ParseFunc, nil)
 		},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			fmt.Println(string(r.Body))
 			fmt.Println(r.Request.URL.String(), r.Header)
 		},
@@ -185,9 +186,9 @@ func TestGetRenderedCookie(t *testing.T) {
 			}
 			req.Header.Set("Cookie", "key=value")
 			req.Rendered = true
-			g.Do(req, g.Opt.ParseFunc)
+			g.Do(req, g.Opt.ParseFunc, nil)
 		},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			assert.Contains(t, string(r.Body), "key=value")
 		},
 	}).Start()
@@ -210,9 +211,9 @@ func TestGetRenderedCookie(t *testing.T) {
 func TestHEADRequest(t *testing.T) {
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartRequestsFunc: func(g *geziyor.Geziyor) {
-			g.Head("https://httpbin.org/anything", g.Opt.ParseFunc)
+			g.Head("https://httpbin.org/anything", g.Opt.ParseFunc, nil)
 		},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			fmt.Println(string(r.Body))
 		},
 	}).Start()
@@ -233,9 +234,9 @@ func TestPostJson(_ *testing.T) {
 
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartRequestsFunc: func(g *geziyor.Geziyor) {
-			g.Post("https://reqbin.com/echo/post/json", payloadBuf, g.Opt.ParseFunc)
+			g.Post("https://reqbin.com/echo/post/json", payloadBuf, g.Opt.ParseFunc, nil)
 		},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			fmt.Println(string(r.Body))
 			g.Exports <- string(r.Body)
 		},
@@ -250,9 +251,9 @@ func TestPostFormUrlEncoded(_ *testing.T) {
 
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartRequestsFunc: func(g *geziyor.Geziyor) {
-			g.Post("https://reqbin.com/echo/post/form", strings.NewReader(postForm.Encode()), g.Opt.ParseFunc)
+			g.Post("https://reqbin.com/echo/post/form", strings.NewReader(postForm.Encode()), g.Opt.ParseFunc, nil)
 		},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			fmt.Println(string(r.Body))
 			g.Exports <- map[string]interface{}{
 				"host":            r.Request.Host,
@@ -267,7 +268,7 @@ func TestPostFormUrlEncoded(_ *testing.T) {
 func TestCookies(t *testing.T) {
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"http://quotes.toscrape.com/login"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			if len(g.Client.Cookies(r.Request.URL.String())) == 0 {
 				t.Fatal("Cookies is Empty")
 			}
@@ -276,7 +277,7 @@ func TestCookies(t *testing.T) {
 
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"http://quotes.toscrape.com/login"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			if len(g.Client.Cookies(r.Request.URL.String())) != 0 {
 				t.Fatal("Cookies exist")
 			}
@@ -290,7 +291,7 @@ func TestBasicAuth(t *testing.T) {
 		StartRequestsFunc: func(g *geziyor.Geziyor) {
 			req, _ := client.NewRequest("GET", "https://httpbin.org/anything", nil)
 			req.SetBasicAuth("username", "password")
-			g.Do(req, nil)
+			g.Do(req, nil, nil)
 		},
 		MetricsType: metrics.ExpVar,
 	}).Start()
@@ -300,15 +301,15 @@ func TestRedirect(t *testing.T) {
 	defer leaktest.Check(t)()
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"https://httpbin.org/absolute-redirect/1"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
-			//t.Fail()
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
+			// t.Fail()
 		},
 		MaxRedirect: -1,
 	}).Start()
 
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"https://httpbin.org/absolute-redirect/1"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			if r.StatusCode == 302 {
 				t.Fail()
 			}
@@ -330,7 +331,7 @@ func TestRobots(t *testing.T) {
 	defer leaktest.Check(t)()
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"https://httpbin.org/deny"},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			t.Error("/deny should be blocked by robots.txt middleware")
 		},
 	}).Start()
@@ -341,9 +342,9 @@ func TestPassMetadata(t *testing.T) {
 		StartRequestsFunc: func(g *geziyor.Geziyor) {
 			req, _ := client.NewRequest("GET", "https://httpbin.org/anything", nil)
 			req.Meta["key"] = "value"
-			g.Do(req, g.Opt.ParseFunc)
+			g.Do(req, g.Opt.ParseFunc, nil)
 		},
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			assert.Equal(t, r.Request.Meta["key"], "value")
 		},
 	}).Start()
@@ -365,7 +366,7 @@ func TestProxy(t *testing.T) {
 		StartURLs:         []string{"http://httpbin.org/anything"},
 		ProxyFunc:         client.RoundRobinProxy(ts.URL),
 		RobotsTxtDisabled: true,
-		ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+		ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 			var data map[string]interface{}
 			err := json.Unmarshal(r.Body, &data)
 			assert.NoError(t, err)
@@ -377,7 +378,6 @@ func TestProxy(t *testing.T) {
 
 // Make sure to increase open file descriptor limits before running
 func BenchmarkRequests(b *testing.B) {
-
 	// Create Server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "Hello, client")
@@ -400,7 +400,7 @@ func BenchmarkRequests(b *testing.B) {
 
 			// We only bench here !
 			for i := 0; i < b.N; i++ {
-				g.Do(req, nil)
+				g.Do(req, nil, nil)
 			}
 		},
 		URLRevisitEnabled: true,
@@ -413,17 +413,17 @@ func BenchmarkWhole(b *testing.B) {
 		geziyor.NewGeziyor(&geziyor.Options{
 			AllowedDomains: []string{"quotes.toscrape.com"},
 			StartURLs:      []string{"http://quotes.toscrape.com/"},
-			ParseFunc: func(g *geziyor.Geziyor, r *client.Response) {
+			ParseFunc: func(g *geziyor.Geziyor, r *client.Response, _ chan<- interface{}) {
 				g.Exports <- []string{r.Request.URL.String()}
 				r.HTMLDoc.Find("a").Each(func(i int, s *goquery.Selection) {
 					if href, ok := s.Attr("href"); ok {
 						absoluteURL, _ := r.Request.URL.Parse(href)
-						g.Get(absoluteURL.String(), g.Opt.ParseFunc)
+						g.Get(absoluteURL.String(), g.Opt.ParseFunc, nil)
 					}
 				})
 			},
 			Exporters: []export.Exporter{&export.CSV{}},
-			//MetricsType: metrics.Prometheus,
+			// MetricsType: metrics.Prometheus,
 			LogDisabled: true,
 		}).Start()
 	}

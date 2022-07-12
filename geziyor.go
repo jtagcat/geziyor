@@ -1,6 +1,14 @@
 package geziyor
 
 import (
+	"io"
+	"io/ioutil"
+	"net/http/cookiejar"
+	"os"
+	"os/signal"
+	"runtime/debug"
+	"sync"
+
 	"github.com/chromedp/chromedp"
 	"github.com/geziyor/geziyor/cache"
 	"github.com/geziyor/geziyor/client"
@@ -9,14 +17,6 @@ import (
 	"github.com/geziyor/geziyor/metrics"
 	"github.com/geziyor/geziyor/middleware"
 	"golang.org/x/time/rate"
-
-	"io"
-	"io/ioutil"
-	"net/http/cookiejar"
-	"os"
-	"os/signal"
-	"runtime/debug"
-	"sync"
 )
 
 // Geziyor is our main scraper type
@@ -42,7 +42,6 @@ type Geziyor struct {
 // NewGeziyor creates new Geziyor with default values.
 // If options provided, options
 func NewGeziyor(opt *Options) *Geziyor {
-
 	// Default Options
 	if opt.UserAgent == "" {
 		opt.UserAgent = client.DefaultUserAgent
@@ -162,7 +161,7 @@ func (g *Geziyor) Start() {
 		g.Opt.StartRequestsFunc(g)
 	} else {
 		for _, startURL := range g.Opt.StartURLs {
-			g.Get(startURL, g.Opt.ParseFunc)
+			g.Get(startURL, g.Opt.ParseFunc, make(chan<- interface{}))
 		}
 	}
 
@@ -174,63 +173,63 @@ func (g *Geziyor) Start() {
 }
 
 // Get issues a GET to the specified URL.
-func (g *Geziyor) Get(url string, callback func(g *Geziyor, r *client.Response)) {
+func (g *Geziyor) Get(url string, callback func(g *Geziyor, r *client.Response, back chan<- interface{}), back chan<- interface{}) {
 	req, err := client.NewRequest("GET", url, nil)
 	if err != nil {
 		internal.Logger.Printf("Request creating error %v\n", err)
 		return
 	}
-	g.Do(req, callback)
+	g.Do(req, callback, back)
 }
 
 // GetRendered issues GET request using headless browser
 // Opens up a new Chrome instance, makes request, waits for rendering HTML DOM and closed.
 // Rendered requests only supported for GET requests.
-func (g *Geziyor) GetRendered(url string, callback func(g *Geziyor, r *client.Response)) {
+func (g *Geziyor) GetRendered(url string, callback func(g *Geziyor, r *client.Response, back chan<- interface{}), back chan<- interface{}) {
 	req, err := client.NewRequest("GET", url, nil)
 	if err != nil {
 		internal.Logger.Printf("Request creating error %v\n", err)
 		return
 	}
 	req.Rendered = true
-	g.Do(req, callback)
+	g.Do(req, callback, back)
 }
 
 // Head issues a HEAD to the specified URL
-func (g *Geziyor) Head(url string, callback func(g *Geziyor, r *client.Response)) {
+func (g *Geziyor) Head(url string, callback func(g *Geziyor, r *client.Response, back chan<- interface{}), back chan<- interface{}) {
 	req, err := client.NewRequest("HEAD", url, nil)
 	if err != nil {
 		internal.Logger.Printf("Request creating error %v\n", err)
 		return
 	}
-	g.Do(req, callback)
+	g.Do(req, callback, back)
 }
 
 // Post issues a POST to the specified URL
-func (g *Geziyor) Post(url string, body io.Reader, callback func(g *Geziyor, r *client.Response)) {
+func (g *Geziyor) Post(url string, body io.Reader, callback func(g *Geziyor, r *client.Response, back chan<- interface{}), back chan<- interface{}) {
 	req, err := client.NewRequest("POST", url, body)
 	if err != nil {
 		internal.Logger.Printf("Request creating error %v\n", err)
 		return
 	}
-	g.Do(req, callback)
+	g.Do(req, callback, back)
 }
 
 // Do sends an HTTP request
-func (g *Geziyor) Do(req *client.Request, callback func(g *Geziyor, r *client.Response)) {
+func (g *Geziyor) Do(req *client.Request, callback func(g *Geziyor, r *client.Response, back chan<- interface{}), back chan<- interface{}) {
 	if g.shutdown {
 		return
 	}
 	g.wgRequests.Add(1)
 	if req.Synchronized {
-		g.do(req, callback)
+		g.do(req, callback, back)
 	} else {
-		go g.do(req, callback)
+		go g.do(req, callback, back)
 	}
 }
 
 // Do sends an HTTP request
-func (g *Geziyor) do(req *client.Request, callback func(g *Geziyor, r *client.Response)) {
+func (g *Geziyor) do(req *client.Request, callback func(g *Geziyor, r *client.Response, back chan<- interface{}), back chan<- interface{}) {
 	g.acquireSem(req)
 	defer g.releaseSem(req)
 	defer g.wgRequests.Done()
@@ -259,10 +258,10 @@ func (g *Geziyor) do(req *client.Request, callback func(g *Geziyor, r *client.Re
 
 	// Callbacks
 	if callback != nil {
-		callback(g, res)
+		callback(g, res, back)
 	} else {
 		if g.Opt.ParseFunc != nil {
-			g.Opt.ParseFunc(g, res)
+			g.Opt.ParseFunc(g, res, back)
 		}
 	}
 }
