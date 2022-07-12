@@ -66,10 +66,13 @@ func TestCache(t *testing.T) {
 
 func TestQuotes(t *testing.T) {
 	defer leaktest.Check(t)()
+
+	dir := t.TempDir()
+
 	geziyor.NewGeziyor(&geziyor.Options{
 		StartURLs: []string{"http://quotes.toscrape.com/"},
 		ParseFunc: quotesParse,
-		Exporters: []export.Exporter{&export.JSONLine{FileName: "1.jsonl"}, &export.JSON{FileName: "2.json"}},
+		Exporters: []export.Exporter{&export.JSONLine{FileName: dir + "1.jsonl"}, &export.JSON{FileName: dir + "2.json"}},
 	}).Start()
 }
 
@@ -224,7 +227,7 @@ type PostBody struct {
 	Message  string `json:"message"`
 }
 
-func TestPostJson(_ *testing.T) {
+func TestPostJson(t *testing.T) {
 	postBody := &PostBody{
 		UserName: "Juan Valdez",
 		Message:  "Best coffee in town",
@@ -240,11 +243,11 @@ func TestPostJson(_ *testing.T) {
 			fmt.Println(string(r.Body))
 			g.Exports <- string(r.Body)
 		},
-		Exporters: []export.Exporter{&export.JSON{FileName: "post_json.json"}},
+		Exporters: []export.Exporter{&export.JSON{FileName: t.TempDir() + "post_json.json"}},
 	}).Start()
 }
 
-func TestPostFormUrlEncoded(_ *testing.T) {
+func TestPostFormUrlEncoded(t *testing.T) {
 	postForm := url.Values{}
 	postForm.Set("user_name", "Juan Valdez")
 	postForm.Set("message", "Enjoy a good coffee!")
@@ -261,7 +264,7 @@ func TestPostFormUrlEncoded(_ *testing.T) {
 				"entire_response": string(r.Body),
 			}
 		},
-		Exporters: []export.Exporter{&export.JSON{FileName: "post_form.json"}},
+		Exporters: []export.Exporter{&export.JSON{FileName: t.TempDir() + "post_form.json"}},
 	}).Start()
 }
 
